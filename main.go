@@ -97,9 +97,16 @@ func (s ParcelService) Delete(number int) error {
 }
 
 func main() {
-	// настройте подключение к БД
+	// Подключаемся к SQLite-базе tracker.db
+	db, err := sql.Open("sqlite", "tracker.db")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer db.Close()
 
-	store := // создайте объект ParcelStore функцией NewParcelStore
+	// Создаём хранилище и сервис
+	store := NewParcelStore(db)
 	service := NewParcelService(store)
 
 	// регистрация посылки

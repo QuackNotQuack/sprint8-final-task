@@ -2,59 +2,133 @@ package main
 
 import (
 	"database/sql"
+	"errors"
 )
 
+// ParcelStore отвечает за работу с БД: добавление, обновление, получение, удаление посылок.
 type ParcelStore struct {
 	db *sql.DB
 }
 
+// NewParcelStore возвращает новый экземпляр ParcelStore с переданным подключением к БД.
 func NewParcelStore(db *sql.DB) ParcelStore {
 	return ParcelStore{db: db}
 }
 
+// Add добавляет новую посылку в таблицу parcel.
+// Возвращает сгенерированный номер (ID) новой посылки.
 func (s ParcelStore) Add(p Parcel) (int, error) {
-	// реализуйте добавление строки в таблицу parcel, используйте данные из переменной p
+	// Выполняем SQL-запрос на добавление новой строки.
+	res, err := s.db.Exec(
+		"INSERT INTO parcel (client, status, address, created_at) VALUES (?, ?, ?, ?)",
+		p.Client, p.Status, p.Address, p.CreatedAt,
+	)
+	if err != nil {
+		return 0, err
+	}
 
-	// верните идентификатор последней добавленной записи
-	return 0, nil
+	// Получаем автоинкрементный номер (ID) последней вставленной записи.
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+
+	// Приводим к типу int и возвращаем.
+	return int(id), nil
 }
 
+// Get возвращает посылку по её номеру (primary key).
 func (s ParcelStore) Get(number int) (Parcel, error) {
-	// реализуйте чтение строки по заданному number
-	// здесь из таблицы должна вернуться только одна строка
+	// Выполняем SQL-запрос, который вернёт одну строку.
+	row := s.db.QueryRow(
+		"SELECT number, client, status, address, created_at FROM parcel WHERE number = ?",
+		number,
+	)
 
-	// заполните объект Parcel данными из таблицы
-	p := Parcel{}
+	// Сканируем строку в структуру Parcel.
+	var p Parcel
+	err := row.Scan(&p.Number, &p.Client, &p.Status, &p.Address, &p.CreatedAt)
+	if err != nil {
+		return Parcel{}, err
+	}
 
 	return p, nil
 }
 
+// GetByClient возвращает все посылки, принадлежащие конкретному клиенту.
 func (s ParcelStore) GetByClient(client int) ([]Parcel, error) {
-	// реализуйте чтение строк из таблицы parcel по заданному client
-	// здесь из таблицы может вернуться несколько строк
+	// Выполняем SQL-запрос, возвращающий все строки по заданному client.
+	rows, err := s.db.Query(
+		"SELECT number, client, status, address, created_at FROM parcel WHERE client = ?",
+		client,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
 
-	// заполните срез Parcel данными из таблицы
 	var res []Parcel
+
+	// Сканируем каждую строку в структуру Parcel и добавляем в срез.
+	for rows.Next() {
+		var p Parcel
+		err := rows.Scan(&p.Number, &p.Client, &p.Status, &p.Address, &p.CreatedAt)
+		if err != nil {
+			return nil, err
+		}
+		res = append(res, p)
+	}
 
 	return res, nil
 }
 
+// SetStatus обновляет статус посылки по её номеру.
 func (s ParcelStore) SetStatus(number int, status string) error {
-	// реализуйте обновление статуса в таблице parcel
-
-	return nil
+	_, err := s.db.Exec(
+		"UPDATE parcel SET status = ? WHERE number = ?",
+		status, number,
+	)
+	return err
 }
 
+// SetAddress меняет адрес доставки посылки, если она ещё не отправлена (т.е. статус = "registered").
 func (s ParcelStore) SetAddress(number int, address string) error {
-	// реализуйте обновление адреса в таблице parcel
-	// менять адрес можно только если значение статуса registered
+	// Получаем текущую информацию о посылке.
+	p, err := s.Get(number)
+	if err != nil {
+		return err
+	}
 
-	return nil
+	// Разрешаем изменение только если статус — "зарегистрирована".
+	if p.Status != ParcelStatusRegistered {
+		return errors.New("can change address only for registered parcels")
+	}
+
+	// Выполняем SQL-запрос на обновление адреса.
+	_, err = s.db.Exec(
+		"UPDATE parcel SET address = ? WHERE number = ?",
+		address, number,
+	)
+	return err
 }
 
+// Delete удаляет посылку, если она ещё не была отправлена (т.е. статус = "registered").
 func (s ParcelStore) Delete(number int) error {
-	// реализуйте удаление строки из таблицы parcel
-	// удалять строку можно только если значение статуса registered
+	// Получаем информацию о посылке.
+	p, err := s.Get(number)
+	if err != nil {
+		return err
+	}
 
-	return nil
+	// Разрешаем удаление только если статус — "зарегистрирована".
+	if p.Status != ParcelStatusRegistered {
+		return errors.New("can delete only registered parcels")
+	}
+
+	// Выполняем SQL-запрос на удаление строки.
+	_, err = s.db.Exec(
+		"DELETE FROM parcel WHERE number = ?",
+		number,
+	)
+	return err
 }
