@@ -79,6 +79,10 @@ func (s ParcelStore) GetByClient(client int) ([]Parcel, error) {
 		res = append(res, p)
 	}
 
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
 	return res, nil
 }
 
@@ -93,42 +97,50 @@ func (s ParcelStore) SetStatus(number int, status string) error {
 
 // SetAddress меняет адрес доставки посылки, если она ещё не отправлена (т.е. статус = "registered").
 func (s ParcelStore) SetAddress(number int, address string) error {
-	// Получаем текущую информацию о посылке.
-	p, err := s.Get(number)
+	// Пытаемся обновить адрес только если статус "registered"
+	res, err := s.db.Exec(
+		"UPDATE parcel SET address = ? WHERE number = ? AND status = ?",
+		address, number, ParcelStatusRegistered,
+	)
 	if err != nil {
-		return err
+		return err // ошибка при выполнении запроса
 	}
 
-	// Разрешаем изменение только если статус — "зарегистрирована".
-	if p.Status != ParcelStatusRegistered {
+	// Проверка обновления хотя бы одной строки
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return err // ошибка при получении количества обновлённых строк
+	}
+	if rowsAffected == 0 {
+		// либо не существует посылки с таким номером,
+		// либо она уже не в статусе "registered"
 		return errors.New("can change address only for registered parcels")
 	}
 
-	// Выполняем SQL-запрос на обновление адреса.
-	_, err = s.db.Exec(
-		"UPDATE parcel SET address = ? WHERE number = ?",
-		address, number,
-	)
-	return err
+	return nil
 }
 
 // Delete удаляет посылку, если она ещё не была отправлена (т.е. статус = "registered").
 func (s ParcelStore) Delete(number int) error {
-	// Получаем информацию о посылке.
-	p, err := s.Get(number)
+	// Пытаемся удалить посылку, только если она в статусе "registered"
+	res, err := s.db.Exec(
+		"DELETE FROM parcel WHERE number = ? AND status = ?",
+		number, ParcelStatusRegistered,
+	)
 	if err != nil {
-		return err
+		return err // ошибка при выполнении запроса
 	}
 
-	// Разрешаем удаление только если статус — "зарегистрирована".
-	if p.Status != ParcelStatusRegistered {
+	// действительно ли что-то было удалено?
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return err // ошибка при получении количества затронутых строк
+	}
+	if rowsAffected == 0 {
+		// либо посылки не существует,
+		// либо она не подлежит удалению
 		return errors.New("can delete only registered parcels")
 	}
 
-	// Выполняем SQL-запрос на удаление строки.
-	_, err = s.db.Exec(
-		"DELETE FROM parcel WHERE number = ?",
-		number,
-	)
-	return err
+	return nil
 }
